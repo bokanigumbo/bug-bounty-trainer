@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bug_bounty.exe</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css" rel="stylesheet">
+  <style>
+    /* reset everything so browser defaults don't mess things up */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* css variables for light mode colours */
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f5;
+      --bg-tertiary: #eeeeee;
+      --text-primary: #111111;
+      --text-secondary: #666666;
+      --text-tertiary: #999999;
+      --border-light: rgba(0,0,0,0.12);
+      --border-mid: rgba(0,0,0,0.22);
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    /* swap to dark mode colours if the user prefers it */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-primary: #1a1a1a;
+        --bg-secondary: #242424;
+        --bg-tertiary: #2e2e2e;
+        --text-primary: #f0f0f0;
+        --text-secondary: #999999;
+        --text-tertiary: #666666;
+        --border-light: rgba(255,255,255,0.10);
+        --border-mid: rgba(255,255,255,0.18);
+      }
+    }
+
+    /* base page styles - jetbrains mono makes everything feel like a code editor */
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    /* centre the app and cap the width so it doesn't stretch too wide */
+    #app { max-width: 720px; margin: 0 auto; }
+
+    /* header row with title on left, level badge on right */
+    .title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+    .title { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; }
+    .title span { color: var(--text-secondary); font-weight: 400; }
+    .tagline { font-size: 11px; color: var(--text-secondary); margin-bottom: 1.5rem; font-style: italic; }
+    .level-badge { font-size: 11px; padding: 3px 10px; border-radius: 99px; background: #EEEDFE; color: #3C3489; font-weight: 700; }
+
+    /* 4-column stats grid */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1rem; }
+    .stat-card { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 0.75rem 1rem; }
+    .stat-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .stat-value { font-size: 20px; font-weight: 700; color: var(--text-primary); }
+
+    /* badges row - faded out until earned */
+    .badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1rem; }
+    .badge { font-size: 11px; padding: 3px 9px; border-radius: var(--radius-md); border: 0.5px solid var(--border-light); color: var(--text-secondary); opacity: 0.35; display: flex; align-items: center; gap: 4px; }
+    .badge.earned { opacity: 1; background: var(--bg-secondary); color: var(--text-primary); border-color: var(--border-mid); }
+
+    /* tab bar - each tab takes equal space */
+    .tabs { display: flex; border: 0.5px solid var(--border-light); border-radius: var(--radius-md); overflow: hidden; margin-bottom: 1rem; }
+    .tab { flex: 1; padding: 7px 4px; font-size: 11px; font-family: 'JetBrains Mono', monospace; cursor: pointer; background: transparent; border: none; color: var(--text-secondary); border-right: 0.5px solid var(--border-light); }
+    .tab:last-child { border-right: none; }
+    .tab.active { background: var(--bg-secondary); color: var(--text-primary); font-weight: 700; }
+    .tab:hover:not(.active) { background: var(--bg-secondary); }
+
+    /* generic card used throughout */
+    .card { background: var(--bg-primary); border: 0.5px solid var(--border-light); border-radius: var(--radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+
+    /* snippet header pills - language, difficulty, mode */
+    .snippet-header { display: flex; align-items: center; gap: 8px; margin-bottom: 1rem; flex-wrap: wrap; }
+    .lang-pill { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+    .lang-py   { background: #E6F1FB; color: #0C447C; }
+    .lang-js   { background: #FAEEDA; color: #633806; }
+    .lang-java { background: #FAECE7; color: #712B13; }
+    .lang-cpp  { background: #EEEDFE; color: #3C3489; }
+    .diff-pill   { font-size: 11px; padding: 3px 10px; border-radius: 99px; }
+    .diff-easy   { background: #EAF3DE; color: #27500A; }
+    .diff-medium { background: #FAEEDA; color: #633806; }
+    .diff-hard   { background: #FCEBEB; color: #791F1F; }
+    .mode-pill { font-size: 11px; padding: 3px 10px; border-radius: 99px; background: #E1F5EE; color: #085041; font-weight: 700; }
+    .bug-lbl { font-size: 11px; color: var(--text-secondary); font-style: italic; }
+
+    /* description above the code block */
+    .snippet-desc { font-size: 12px; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.6; }
+
+    /* code block - monospace, scrollable if the snippet is wide */
+    pre { background: var(--bg-tertiary); border-radius: var(--radius-md); padding: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.8; overflow-x: auto; color: var(--text-primary); white-space: pre-wrap; margin-bottom: 1rem; border: 0.5px solid var(--border-light); }
+
+    /* explain mode box - shown instead of "find the bug" prompt */
+    .explain-box { background: var(--bg-tertiary); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1rem; font-size: 12px; line-height: 1.7; color: var(--text-primary); border: 0.5px solid var(--border-mid); }
+
+    /* answer textarea */
+    textarea { width: 100%; min-height: 72px; padding: 10px 12px; font-size: 12px; font-family: 'JetBrains Mono', monospace; border-radius: var(--radius-md); border: 0.5px solid var(--border-mid); background: var(--bg-primary); color: var(--text-primary); resize: vertical; }
+    textarea::placeholder { color: var(--text-tertiary); font-style: italic; }
+    textarea:focus { outline: none; border-color: #534AB7; }
+
+    /* button row below the textarea */
+    .btn-row { display: flex; gap: 8px; margin-top: 0.75rem; flex-wrap: wrap; }
+    button { cursor: pointer; font-family: 'JetBrains Mono', monospace; transition: opacity 0.15s; }
+
+    /* solid primary button */
+    .btn-primary { background: var(--text-primary); color: var(--bg-primary); border: none; border-radius: var(--radius-md); padding: 9px 20px; font-size: 12px; font-weight: 700; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ghost secondary button */
+    .btn-secondary { background: transparent; border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 9px 16px; font-size: 12px; color: var(--text-primary); }
+    .btn-secondary:hover { background: var(--bg-secondary); }
+
+    /* green tinted mode toggle button */
+    .btn-mode { background: #E1F5EE; border: none; border-radius: var(--radius-md); padding: 9px 14px; font-size: 12px; color: #085041; font-weight: 700; white-space: nowrap; }
+
+    /* feedback box - colour changes based on result */
+    .feedback { border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-top: 1rem; font-size: 12px; line-height: 1.7; }
+    .feedback.correct   { background: #EAF3DE; color: #173404; border: 0.5px solid #97C459; }
+    .feedback.partial   { background: #FAEEDA; color: #412402; border: 0.5px solid #EF9F27; }
+    .feedback.incorrect { background: #FCEBEB; color: #501313; border: 0.5px solid #F09595; }
+    .fix-line { font-size: 11px; opacity: 0.8; margin-top: 8px; padding-top: 8px; border-top: 0.5px solid rgba(0,0,0,0.1); }
+
+    /* centered italic text shown while waiting for the ai to respond */
+    .loading-msg { font-size: 12px; color: var(--text-secondary); padding: 2rem 0; text-align: center; font-style: italic; }
+
+    /* language filter row in the hunt tab */
+    .lang-filter { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .lf-btn { font-size: 11px; padding: 3px 10px; border-radius: 99px; border: 0.5px solid var(--border-mid); background: transparent; color: var(--text-secondary); cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+    .lf-btn.active { background: var(--text-primary); color: var(--bg-primary); border-color: var(--text-primary); }
+    .lf-btn:hover:not(.active) { background: var(--bg-secondary); }
+
+    /* reusable section heading inside cards */
+    .section-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 0.75rem; }
+
+    /* weak spots bar chart rows */
+    .weak-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .weak-label { font-size: 11px; color: var(--text-secondary); width: 130px; flex-shrink: 0; }
+    .weak-bar-bg { flex: 1; height: 5px; background: var(--bg-secondary); border-radius: 99px; overflow: hidden; }
+    .weak-bar-fill { height: 100%; border-radius: 99px; transition: width 0.5s; }
+    .weak-pct { font-size: 11px; color: var(--text-secondary); width: 34px; text-align: right; }
+
+    /* github-style activity heatmap grid */
+    .heatmap-grid { display: grid; grid-template-columns: repeat(26, 1fr); gap: 3px; margin-top: 0.5rem; }
+    .heatmap-cell { aspect-ratio: 1; border-radius: 2px; }
+    .heatmap-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; color: var(--text-secondary); }
+
+    /* leaderboard row */
+    .lb-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 0.5px solid var(--border-light); }
+    .lb-rank { font-size: 12px; font-weight: 700; color: var(--text-secondary); width: 24px; flex-shrink: 0; }
+    .lb-name { font-size: 12px; color: var(--text-primary); flex: 1; }
+    .lb-xp   { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+    .lb-bar-bg   { width: 80px; height: 4px; background: var(--bg-secondary); border-radius: 99px; overflow: hidden; }
+    .lb-bar-fill { height: 100%; background: #534AB7; border-radius: 99px; }
+
+    /* share card shown in the .share() tab */
+    .share-card { background: var(--bg-secondary); border-radius: var(--radius-lg); padding: 1.25rem; border: 0.5px solid var(--border-light); }
+    .share-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 1rem; }
+    .share-stat { text-align: center; }
+    .share-stat-val { font-size: 24px; font-weight: 700; color: var(--text-primary); }
+    .share-stat-lbl { font-size: 11px; color: var(--text-secondary); }
+
+    /* toast that pops up briefly when xp is awarded */
+    .xp-toast { background: var(--text-primary); color: var(--bg-primary); padding: 8px 16px; border-radius: var(--radius-md); font-size: 12px; font-weight: 700; margin-bottom: 1rem; display: none; text-align: center; }
+
+    /* categories grid - auto fills columns based on available space */
+    .cat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .cat-card { background: var(--bg-secondary); border-radius: var(--radius-md); padding: 0.75rem 1rem; cursor: pointer; border: 0.5px solid var(--border-light); }
+    .cat-card:hover { border-color: var(--border-mid); }
+    .cat-card.active-filter { border-color: #534AB7; background: #EEEDFE; }
+    .cat-name { font-size: 11px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+    .cat-bar-bg { height: 4px; background: var(--bg-primary); border-radius: 99px; overflow: hidden; margin-bottom: 4px; }
+    .cat-bar-fill { height: 100%; border-radius: 99px; transition: width 0.5s; }
+    .cat-stats { font-size: 11px; color: var(--text-secondary); }
+
+    /* difficulty voting row that appears after submitting */
+    .vote-row { display: flex; gap: 8px; margin-top: 1rem; align-items: center; flex-wrap: wrap; }
+    .vote-label { font-size: 11px; color: var(--text-secondary); }
+    .vote-btn { font-size: 11px; padding: 4px 10px; border-radius: 99px; border: 0.5px solid var(--border-mid); background: transparent; color: var(--text-secondary); cursor: pointer; font-family: 'JetBrains Mono', monospace; }
+    .vote-btn.voted { background: var(--text-primary); color: var(--bg-primary); border-color: var(--text-primary); }
+    .vote-tally { font-size: 11px; color: var(--text-secondary); margin-left: auto; font-style: italic; }
+
+    /* text input for entering leaderboard name */
+    .name-input { width: 100%; font-size: 12px; font-family: 'JetBrains Mono', monospace; padding: 9px 12px; border-radius: var(--radius-md); border: 0.5px solid var(--border-mid); background: var(--bg-primary); color: var(--text-primary); margin-bottom: 8px; }
+    .name-input:focus { outline: none; border-color: #534AB7; }
+
+    /* flexbox row holding the lang filter + mode toggle */
+    .hunt-controls { display: flex; gap: 8px; margin-bottom: 0.75rem; align-items: center; flex-wrap: wrap; }
+
+    /* on small screens collapse the stats to 2 columns */
+    @media (max-width: 480px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .share-row { justify-content: flex-start; gap: 20px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <div class="title-row">
+    <div class="title">bug_bounty<span>.exe</span></div>
+    <span class="level-badge" id="level-badge">// level_1</span>
+  </div>
+  <div class="tagline" id="tagline">// it's not a bug, it's an undocumented feature</div>
+
+  <!-- toast message shown briefly when xp is gained or a badge is unlocked -->
+  <div class="xp-toast" id="xp-toast"></div>
+
+  <!-- top stats bar -->
+  <div class="stats">
+    <div class="stat-card"><div class="stat-label">xp</div><div class="stat-value" id="xp-val">0</div></div>
+    <div class="stat-card"><div class="stat-label">streak</div><div class="stat-value" id="streak-val">0 🔥</div></div>
+    <div class="stat-card"><div class="stat-label">solved</div><div class="stat-value" id="solved-val">0</div></div>
+    <div class="stat-card"><div class="stat-label">accuracy</div><div class="stat-value" id="acc-val">—</div></div>
+  </div>
+
+  <!-- badges - faded until earned -->
+  <div class="badges" id="badges-row">
+    <div class="badge" data-id="first_blood"><i class="ti ti-droplet"></i> first_blood</div>
+    <div class="badge" data-id="streak3"><i class="ti ti-flame"></i> on_fire(3)</div>
+    <div class="badge" data-id="streak5"><i class="ti ti-rocket"></i> unstoppable(5)</div>
+    <div class="badge" data-id="polyglot"><i class="ti ti-world"></i> polyglot</div>
+    <div class="badge" data-id="perfect10"><i class="ti ti-star"></i> perfect_10</div>
+    <div class="badge" data-id="hard_mode"><i class="ti ti-skull"></i> hard_mode</div>
+    <div class="badge" data-id="explainer"><i class="ti ti-bulb"></i> explainer</div>
+  </div>
+
+  <!-- main tab navigation -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('hunt')">hunt()</button>
+    <button class="tab" onclick="switchTab('categories')">categories[]</button>
+    <button class="tab" onclick="switchTab('stats')">stats[]</button>
+    <button class="tab" onclick="switchTab('leaderboard')">leaderboard</button>
+    <button class="tab" onclick="switchTab('share')">.share()</button>
+  </div>
+
+  <!-- ===================== HUNT TAB ===================== -->
+  <div id="tab-hunt">
+
+    <!-- language filter + mode toggle in one row -->
+    <div class="hunt-controls">
+      <div class="lang-filter">
+        <span style="font-size:11px;color:var(--text-secondary);">filter:</span>
+        <button class="lf-btn active" onclick="setLangFilter('any')" id="lf-any">any</button>
+        <button class="lf-btn" onclick="setLangFilter('Python')" id="lf-Python">Python</button>
+        <button class="lf-btn" onclick="setLangFilter('JavaScript')" id="lf-JavaScript">JavaScript</button>
+        <button class="lf-btn" onclick="setLangFilter('Java')" id="lf-Java">Java</button>
+        <button class="lf-btn" onclick="setLangFilter('C++')" id="lf-C++">C++</button>
+      </div>
+      <button class="btn-mode" onclick="toggleMode()" id="mode-toggle">mode: find_bug()</button>
+    </div>
+
+    <!-- shown when a category filter is active -->
+    <div id="cat-filter-banner" style="display:none;margin-bottom:0.5rem;font-size:11px;color:var(--text-secondary);align-items:center;gap:8px;">
+      <span>drilling into: <strong id="cat-active-label" style="color:var(--text-primary)"></strong></span>
+      <button class="btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="clearCatFilter()">clear</button>
+    </div>
+
+    <div class="card">
+      <!-- loading state while the ai generates a snippet -->
+      <div class="loading-msg" id="loading-msg">
+        <i class="ti ti-loader"></i> generating bug... please hold (and don't touch production)
+      </div>
+
+      <!-- snippet content - hidden until the ai responds -->
+      <div id="snippet-content" style="display:none">
+        <div class="snippet-header">
+          <span class="lang-pill" id="lang-pill"></span>
+          <span class="diff-pill" id="diff-pill"></span>
+          <span class="mode-pill" id="mode-pill">find</span>
+          <span class="bug-lbl" id="bug-type-label"></span>
+        </div>
+
+        <!-- one line description of what the code is supposed to do -->
+        <div class="snippet-desc" id="snippet-desc"></div>
+
+        <!-- explain mode only: shown when the bug is explained to the user -->
+        <div id="explain-box-wrap" style="display:none">
+          <div class="explain-box" id="explain-box"></div>
+        </div>
+
+        <!-- the actual buggy code -->
+        <pre id="code-block"></pre>
+
+        <!-- user types their answer here -->
+        <textarea id="user-answer" placeholder="// what's the bug? describe it and suggest a fix..."></textarea>
+
+        <div class="btn-row">
+          <button class="btn-primary" id="submit-btn" onclick="submitAnswer()">submit() ↗</button>
+          <button class="btn-secondary" onclick="nextSnippet()">skip // next</button>
+        </div>
+
+        <!-- ai feedback shown after submitting -->
+        <div id="feedback-area"></div>
+
+        <!-- difficulty vote - shown after feedback -->
+        <div id="vote-area" style="display:none">
+          <div class="vote-row">
+            <span class="vote-label">// how hard was that?</span>
+            <button class="vote-btn" onclick="castVote('easy')">easy</button>
+            <button class="vote-btn" onclick="castVote('fair')">fair</button>
+            <button class="vote-btn" onclick="castVote('hard')">hard</button>
+            <span class="vote-tally" id="vote-tally"></span>
+          </div>
+        </div>
+
+        <!-- next bug button shown after feedback -->
+        <div id="next-area" style="display:none;margin-top:0.75rem;">
+          <button class="btn-secondary" onclick="nextSnippet()">next_bug() <i class="ti ti-arrow-right"></i></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== CATEGORIES TAB ===================== -->
+  <div id="tab-categories" style="display:none">
+    <div class="card">
+      <div class="section-title"><i class="ti ti-category"></i> bug categories <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">// click to drill into a type</span></div>
+      <!-- cards are generated by renderCategories() in js -->
+      <div class="cat-grid" id="cat-grid">
+        <span style="font-size:12px;color:var(--text-secondary);font-style:italic">// solve some bugs to populate this</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== STATS TAB ===================== -->
+  <div id="tab-stats" style="display:none">
+    <div class="card">
+      <div class="section-title"><i class="ti ti-calendar"></i> activity heatmap</div>
+      <!-- cells are generated by renderHeatmap() in js -->
+      <div class="heatmap-grid" id="heatmap-grid"></div>
+      <div class="heatmap-legend">
+        <span>less</span>
+        <div style="width:12px;height:12px;border-radius:2px;background:#EAF3DE;border:0.5px solid #ccc"></div>
+        <div style="width:12px;height:12px;border-radius:2px;background:#97C459"></div>
+        <div style="width:12px;height:12px;border-radius:2px;background:#3B6D11"></div>
+        <div style="width:12px;height:12px;border-radius:2px;background:#173404"></div>
+        <span>more</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title"><i class="ti ti-chart-bar"></i> weakSpots[]</div>
+      <!-- bars are generated by renderWeakSpots() in js -->
+      <div id="weak-rows">
+        <span style="font-size:12px;color:var(--text-secondary);font-style:italic">// solve some bugs to see your weak spots</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== LEADERBOARD TAB ===================== -->
+  <div id="tab-leaderboard" style="display:none">
+    <div class="card">
+      <div class="section-title"><i class="ti ti-trophy"></i> leaderboard <span style="font-size:11px;font-weight:400;color:var(--text-secondary)">// post your score from the .share() tab</span></div>
+      <div id="lb-rows">
+        <span style="font-size:12px;color:var(--text-secondary);font-style:italic">// loading...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SHARE TAB ===================== -->
+  <div id="tab-share" style="display:none">
+    <div class="card">
+      <div class="section-title"><i class="ti ti-share"></i> your stats card</div>
+
+      <!-- shareable stats card - updated by updateStats() -->
+      <div class="share-card">
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:0.75rem;">
+          bug_bounty.exe <span style="font-weight:400;color:var(--text-secondary)">// my stats</span>
+        </div>
+        <div class="share-row">
+          <div class="share-stat"><div class="share-stat-val" id="sc-xp">0</div><div class="share-stat-lbl">total xp</div></div>
+          <div class="share-stat"><div class="share-stat-val" id="sc-solved">0</div><div class="share-stat-lbl">bugs solved</div></div>
+          <div class="share-stat"><div class="share-stat-val" id="sc-acc">—</div><div class="share-stat-lbl">accuracy</div></div>
+          <div class="share-stat"><div class="share-stat-val" id="sc-streak">0</div><div class="share-stat-lbl">best streak</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-secondary);border-top:0.5px solid var(--border-light);padding-top:0.75rem;" id="sc-badges-line">// no badges yet</div>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:0.5rem;" id="sc-level">// level_1</div>
+      </div>
+
+      <div style="margin-top:0.75rem;">
+        <button class="btn-secondary" onclick="copyShare()"><i class="ti ti-copy"></i> copy stats as text</button>
+      </div>
+
+      <!-- post to leaderboard - stored in localstorage -->
+      <div style="margin-top:1rem;">
+        <input class="name-input" type="text" id="lb-name-input" placeholder="// enter name to post to leaderboard">
+        <button class="btn-primary" onclick="postToLeaderboard()">post_to_leaderboard() ↗</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // groq api key and model - llama 3.3 70b is strong enough for code generation
+  const GROQ_API_KEY = "YOUR_API_KEY_HERE";
+  const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+
+  // rotating puns shown in the tagline each time a new snippet loads
+  const PUNS = [
+    "// it's not a bug, it's an undocumented feature",
+    "// a bug walks into a bar. orders 1.000000000000001 beers.",
+    "// there are only two hard things in CS: cache invalidation, naming things, and off-by-one errors",
+    "// 99 little bugs in the code... take one down, patch it around... 127 little bugs in the code",
+    "// why do programmers prefer dark mode? because light attracts bugs",
+    "// my code works. i have no idea why. please don't touch it.",
+    "// undefined is not a function (but it is a way of life)",
+    "// git blame: the most passive-aggressive command in software",
+    "// works on my machine \u00AF\\_(\u30C4)_/\u00AF",
+    "// // todo: fix this later (written 3 years ago)",
+    "// semicolons are just vibes at this point",
+    "// the first 90% of the code takes 90% of the time. the other 10% takes the other 90%."
+  ];
+
+  // xp thresholds for each level
+  const LEVELS = [
+    { min: 0,    label: '// level_1' },
+    { min: 100,  label: '// level_2' },
+    { min: 250,  label: '// level_3' },
+    { min: 500,  label: '// level_4' },
+    { min: 900,  label: '// level_5' },
+    { min: 1500, label: '// level_6' }
+  ];
+
+  // all possible bug types the ai can generate
+  const ALL_BUG_TYPES = [
+    'off-by-one error', 'null reference', 'logic error', 'type mismatch',
+    'infinite loop', 'memory leak', 'incorrect operator', 'missing edge case',
+    'scope error', 'race condition'
+  ];
+
+  // localstorage key for persisting state between sessions
+  const STORAGE_KEY = 'bbt_state_v2';
+
+  // try to load saved state from localstorage
+  function loadState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const s = JSON.parse(saved);
+        // sets need to be rebuilt since json doesn't support them natively
+        s.earnedBadges = new Set(s.earnedBadges || []);
+        s.langsSeen    = new Set(s.langsSeen    || []);
+        return s;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  // save current state to localstorage (skip the current snippet, no need to persist it)
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        ...state,
+        earnedBadges:   [...state.earnedBadges],
+        langsSeen:      [...state.langsSeen],
+        currentSnippet: null
+      }));
+    } catch (e) {}
+  }
+
+  // load state or start fresh if nothing is saved
+  const state = loadState() || {
+    xp: 0, streak: 0, bestStreak: 0, solved: 0, attempts: 0, correct: 0,
+    earnedBadges: new Set(), langsSeen: new Set(),
+    weakSpots: {}, currentSnippet: null, awaitingNext: false,
+    hardSolved: 0, langFilter: 'any', activity: {},
+    currentTab: 'hunt', mode: 'find', catFilter: null,
+    votes: {}, explainSolved: 0
+  };
+
+  // re-apply earned badge styles on page load
+  for (const id of state.earnedBadges) {
+    const el = document.querySelector(`[data-id="${id}"]`);
+    if (el) el.classList.add('earned');
+  }
+
+  // return the level label for a given xp total
+  function getLevel(xp) {
+    let l = LEVELS[0];
+    for (const lv of LEVELS) { if (xp >= lv.min) l = lv; }
+    return l.label;
+  }
+
+  // pick a random pun and update the tagline
+  function rotatePun() {
+    document.getElementById('tagline').textContent = PUNS[Math.floor(Math.random() * PUNS.length)];
+  }
+
+  // returns today's date as a yyyy-mm-dd string for the heatmap
+  function todayKey() { return new Date().toISOString().split('T')[0]; }
+
+  // sync all stat displays and the share card, then save
+  function updateStats() {
+    document.getElementById('xp-val').textContent      = state.xp;
+    document.getElementById('streak-val').textContent  = state.streak + ' \uD83D\uDD25';
+    document.getElementById('solved-val').textContent  = state.solved;
+    const acc = state.attempts === 0 ? '\u2014' : Math.round((state.correct / state.attempts) * 100) + '%';
+    document.getElementById('acc-val').textContent     = acc;
+    document.getElementById('level-badge').textContent = getLevel(state.xp);
+    // also update the share card
+    document.getElementById('sc-xp').textContent      = state.xp;
+    document.getElementById('sc-solved').textContent   = state.solved;
+    document.getElementById('sc-acc').textContent      = acc;
+    document.getElementById('sc-streak').textContent   = state.bestStreak;
+    document.getElementById('sc-level').textContent    = getLevel(state.xp);
+    const bn = [...state.earnedBadges].join(', ');
+    document.getElementById('sc-badges-line').textContent = bn ? '// badges: ' + bn : '// no badges yet';
+    saveState();
+  }
+
+  // briefly show a toast message at the top of the page
+  function showXPToast(msg) {
+    const t = document.getElementById('xp-toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 2200);
+  }
+
+  // check if any badges should be unlocked based on current state
+  function checkBadges() {
+    const earn = (id) => {
+      if (state.earnedBadges.has(id)) return; // already earned, skip
+      state.earnedBadges.add(id);
+      const el = document.querySelector(`[data-id="${id}"]`);
+      if (el) el.classList.add('earned');
+      showXPToast('badge unlocked: ' + el?.textContent?.trim());
+    };
+    if (state.solved >= 1)         earn('first_blood');
+    if (state.streak >= 3)         earn('streak3');
+    if (state.streak >= 5)         earn('streak5');
+    if (state.langsSeen.size >= 3) earn('polyglot');  // seen 3+ different languages
+    if (state.correct >= 10)       earn('perfect10');
+    if (state.hardSolved >= 1)     earn('hard_mode');
+    if (state.explainSolved >= 3)  earn('explainer'); // solved 3 in explain mode
+  }
+
+  // record a new attempt and re-render the weak spots bars
+  function updateWeakSpots(bugType, correct) {
+    if (!state.weakSpots[bugType]) state.weakSpots[bugType] = { attempts: 0, correct: 0 };
+    state.weakSpots[bugType].attempts++;
+    if (correct) state.weakSpots[bugType].correct++;
+    renderWeakSpots();
+    renderCategories();
+  }
+
+  // draw the weak spots bar chart sorted from worst to best
+  function renderWeakSpots() {
+    const rows = document.getElementById('weak-rows');
+    if (Object.keys(state.weakSpots).length === 0) {
+      rows.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);font-style:italic">// solve some bugs to see your weak spots</span>';
+      return;
+    }
+    rows.innerHTML = '';
+    // sort so the worst categories appear at the top
+    const sorted = Object.entries(state.weakSpots).sort((a, b) =>
+      (a[1].correct / a[1].attempts) - (b[1].correct / b[1].attempts)
+    );
+    for (const [type, data] of sorted) {
+      const pct   = Math.round((data.correct / data.attempts) * 100);
+      // red = struggling, amber = ok, green = solid
+      const color = pct < 50 ? '#E24B4A' : pct < 75 ? '#EF9F27' : '#639922';
+      rows.innerHTML += `<div class="weak-row">
+        <span class="weak-label">${type}</span>
+        <div class="weak-bar-bg"><div class="weak-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+        <span class="weak-pct">${pct}%</span>
+      </div>`;
+    }
+  }
+
+  // draw the categories grid with success rate and community vote per bug type
+  function renderCategories() {
+    const grid = document.getElementById('cat-grid');
+    if (Object.keys(state.weakSpots).length === 0) {
+      grid.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);font-style:italic">// solve some bugs to populate this</span>';
+      return;
+    }
+    grid.innerHTML = '';
+    for (const type of ALL_BUG_TYPES) {
+      const data = state.weakSpots[type];
+      if (!data) continue; // skip types not yet encountered
+      const pct      = Math.round((data.correct / data.attempts) * 100);
+      const color    = pct < 50 ? '#E24B4A' : pct < 75 ? '#EF9F27' : '#639922';
+      const isActive = state.catFilter === type;
+      const vd       = state.votes[type] || { easy: 0, fair: 0, hard: 0 };
+      const total    = vd.easy + vd.fair + vd.hard;
+      // pick whichever vote option has the most votes
+      const topVote  = total > 0 ? (['easy','fair','hard'].reduce((a, b) => vd[a] >= vd[b] ? a : b)) : 'unrated';
+      grid.innerHTML += `<div class="cat-card${isActive ? ' active-filter' : ''}" onclick="setCatFilter('${type}')">
+        <div class="cat-name">${type}</div>
+        <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+        <div class="cat-stats">${pct}% correct &middot; ${data.attempts} attempt${data.attempts !== 1 ? 's' : ''}<br>community: ${topVote}</div>
+      </div>`;
+    }
+  }
+
+  // set a category filter so the next snippet targets that bug type
+  function setCatFilter(type) {
+    // clicking the active filter clears it
+    state.catFilter = state.catFilter === type ? null : type;
+    renderCategories();
+    const banner = document.getElementById('cat-filter-banner');
+    const lbl    = document.getElementById('cat-active-label');
+    if (state.catFilter) {
+      banner.style.display = 'flex';
+      lbl.textContent = state.catFilter;
+      switchTab('hunt'); // jump back to the hunt tab
+      showXPToast('// drilling into: ' + state.catFilter);
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  // remove the category filter
+  function clearCatFilter() {
+    state.catFilter = null;
+    document.getElementById('cat-filter-banner').style.display = 'none';
+    renderCategories();
+  }
+
+  // toggle between find mode (spot the bug) and explain mode (write the fix)
+  function toggleMode() {
+    state.mode = state.mode === 'find' ? 'explain' : 'find';
+    document.getElementById('mode-toggle').textContent =
+      'mode: ' + (state.mode === 'find' ? 'find_bug()' : 'explain_mode()');
+    nextSnippet(); // generate a fresh snippet for the new mode
+  }
+
+  // record a difficulty vote for the current bug type
+  function castVote(difficulty) {
+    const type = state.currentSnippet?.bugType;
+    if (!type) return;
+    if (!state.votes[type]) state.votes[type] = { easy: 0, fair: 0, hard: 0 };
+    state.votes[type][difficulty]++;
+    // highlight the chosen button
+    document.querySelectorAll('.vote-btn').forEach(b => {
+      b.classList.remove('voted');
+      if (b.textContent === difficulty) b.classList.add('voted');
+    });
+    // show running tally
+    const v     = state.votes[type];
+    const total = v.easy + v.fair + v.hard;
+    document.getElementById('vote-tally').textContent =
+      `${v.easy}e \u00B7 ${v.fair}f \u00B7 ${v.hard}h (${total} vote${total !== 1 ? 's' : ''})`;
+    renderCategories();
+    saveState();
+  }
+
+  // add one to today's activity count and re-draw the heatmap
+  function recordActivity() {
+    const k = todayKey();
+    state.activity[k] = (state.activity[k] || 0) + 1;
+    renderHeatmap();
+  }
+
+  // draw 182 day heatmap cells, darker = more activity that day
+  function renderHeatmap() {
+    const grid  = document.getElementById('heatmap-grid');
+    grid.innerHTML = '';
+    const today = new Date();
+    const cells = [];
+    for (let i = 181; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const k = d.toISOString().split('T')[0];
+      cells.push({ key: k, count: state.activity[k] || 0 });
+    }
+    const max    = Math.max(...cells.map(c => c.count), 1);
+    const colors = ['var(--bg-secondary)', '#EAF3DE', '#97C459', '#3B6D11', '#173404'];
+    for (const c of cells) {
+      const div = document.createElement('div');
+      div.className = 'heatmap-cell';
+      // bucket into 0-4 based on relative activity
+      const idx = c.count === 0 ? 0 : Math.min(4, Math.ceil((c.count / max) * 4));
+      div.style.background = colors[idx];
+      div.title = c.key + ': ' + c.count + ' bug(s)';
+      grid.appendChild(div);
+    }
+  }
+
+  // show the right tab panel and trigger any data loads needed
+  function switchTab(tab) {
+    state.currentTab = tab;
+    ['hunt','categories','stats','leaderboard','share'].forEach((t, i) => {
+      document.getElementById('tab-' + t).style.display = t === tab ? 'block' : 'none';
+      document.querySelectorAll('.tab')[i].classList.toggle('active', t === tab);
+    });
+    if (tab === 'stats')       { renderHeatmap(); renderWeakSpots(); }
+    if (tab === 'categories')  renderCategories();
+    if (tab === 'leaderboard') loadLeaderboard();
+    if (tab === 'share')       updateStats();
+  }
+
+  // update which language filter button is active
+  function setLangFilter(lang) {
+    state.langFilter = lang;
+    ['any','Python','JavaScript','Java','C++'].forEach(l => {
+      document.getElementById('lf-' + l)?.classList.toggle('active', l === lang);
+    });
+  }
+
+  // call the groq api - uses openai-compatible chat completions endpoint
+  async function callGroq(messages, maxTokens = 1000) {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_API_KEY
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        max_tokens: maxTokens,
+        messages: [
+          // system prompt tells the model to only return json
+          { role: 'system', content: 'You are a code generation assistant. Always respond with valid JSON only. No markdown, no backticks, no explanation.' },
+          ...messages
+        ]
+      })
+    });
+    const data = await res.json();
+    return data.choices[0].message.content;
+  }
+
+  // ask groq to generate a buggy code snippet
+  async function generateSnippet() {
+    // reset the ui before loading
+    document.getElementById('loading-msg').style.display     = 'block';
+    document.getElementById('snippet-content').style.display = 'none';
+    document.getElementById('feedback-area').innerHTML       = '';
+    document.getElementById('vote-area').style.display       = 'none';
+    document.getElementById('next-area').style.display       = 'none';
+    document.getElementById('user-answer').value             = '';
+    document.getElementById('submit-btn').disabled           = false;
+    document.querySelectorAll('.vote-btn').forEach(b => b.classList.remove('voted'));
+    document.getElementById('vote-tally').textContent        = '';
+    state.awaitingNext = false;
+    rotatePun();
+
+    // pick a random language (or use the filter), difficulty, and bug type
+    const allLangs = ['Python','JavaScript','Java','C++'];
+    const lang     = state.langFilter === 'any'
+      ? allLangs[Math.floor(Math.random() * allLangs.length)]
+      : state.langFilter;
+    // difficulty scales up as the user gets more experienced
+    const diffs    = state.solved < 3 ? ['easy'] : state.solved < 7 ? ['easy','medium'] : ['easy','medium','hard'];
+    const diff     = diffs[Math.floor(Math.random() * diffs.length)];
+    // use the category filter if set, otherwise random
+    const bugType  = state.catFilter || ALL_BUG_TYPES[Math.floor(Math.random() * ALL_BUG_TYPES.length)];
+
+    const basePrompt = `Generate a short self-contained ${lang} code snippet (8-15 lines) with a deliberate ${bugType} bug. Difficulty: ${diff}.`;
+
+    // find mode: user has to spot the bug themselves
+    const findPrompt = `${basePrompt} Respond with JSON only: {"description":"one sentence what the code should do","code":"snippet with bug","bugType":"${bugType}","bugLine":"line(s) with bug","correctFix":"one sentence fix","explainText":null}`;
+
+    // explain mode: bug is explained and user writes the fix
+    const explainPrompt = `${basePrompt} The student will be told what the bug is and must write the fix. Respond with JSON only: {"description":"one sentence what the code should do","code":"snippet with bug","bugType":"${bugType}","bugLine":"line(s) with bug","correctFix":"one sentence fix","explainText":"2-3 sentences explaining the bug without giving away the exact fix"}`;
+
+    try {
+      const text   = await callGroq([{ role: 'user', content: state.mode === 'find' ? findPrompt : explainPrompt }]);
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+      state.currentSnippet = { ...parsed, lang, diff };
+      state.langsSeen.add(lang);
+      renderSnippet();
+    } catch (e) {
+      document.getElementById('loading-msg').textContent = '// error: could not generate snippet. have you tried git blame?';
+      console.error(e);
+    }
+  }
+
+  // put the snippet data into the dom
+  function renderSnippet() {
+    const s = state.currentSnippet;
+    // pick the right colour pill for the language
+    const langClass = { Python: 'lang-py', JavaScript: 'lang-js', Java: 'lang-java', 'C++': 'lang-cpp' }[s.lang] || 'lang-py';
+    const diffClass = { easy: 'diff-easy', medium: 'diff-medium', hard: 'diff-hard' }[s.diff] || 'diff-easy';
+
+    document.getElementById('loading-msg').style.display     = 'none';
+    document.getElementById('snippet-content').style.display = 'block';
+    document.getElementById('lang-pill').className           = 'lang-pill ' + langClass;
+    document.getElementById('lang-pill').textContent         = s.lang;
+    document.getElementById('diff-pill').className           = 'diff-pill ' + diffClass;
+    document.getElementById('diff-pill').textContent         = s.diff;
+    document.getElementById('mode-pill').textContent         = state.mode === 'find' ? 'find' : 'explain';
+    document.getElementById('bug-type-label').textContent    = '// ' + s.bugType;
+    document.getElementById('snippet-desc').textContent      = '/* ' + s.description + ' */';
+    document.getElementById('code-block').textContent        = s.code;
+
+    // show or hide the explain box depending on mode
+    const explainWrap = document.getElementById('explain-box-wrap');
+    const explainBox  = document.getElementById('explain-box');
+    if (state.mode === 'explain' && s.explainText) {
+      explainWrap.style.display = 'block';
+      explainBox.innerHTML = '<strong>// bug explained:</strong> ' + s.explainText +
+        '<br><br><em>your task: write the corrected code or describe the exact fix.</em>';
+      document.getElementById('user-answer').placeholder = '// write the corrected line(s) or describe the exact fix...';
+    } else {
+      explainWrap.style.display = 'none';
+      document.getElementById('user-answer').placeholder = "// what's the bug? describe it and suggest a fix...";
+    }
+  }
+
+  // send the user's answer to groq for evaluation
+  async function submitAnswer() {
+    const answer = document.getElementById('user-answer').value.trim();
+    if (!answer || state.awaitingNext) return;
+    document.getElementById('submit-btn').disabled = true;
+
+    const s = state.currentSnippet;
+    // tell the model to judge on fix accuracy only in explain mode
+    const modeNote = state.mode === 'explain'
+      ? 'The student was told what the bug is and had to write the fix. Judge them on accuracy of the fix only.'
+      : '';
+
+    const evalPrompt = `A student was shown this ${s.lang} code with a ${s.bugType} on line(s) ${s.bugLine}. Correct fix: ${s.correctFix}. ${modeNote}
+
+Code:
+${s.code}
+
+Student answer: "${answer}"
+
+Respond with JSON only: {"result":"correct or partial or incorrect","xpAwarded":number between 0 and 50,"feedback":"2-3 sentences on what they got right or wrong and the correct explanation"}`;
+
+    try {
+      const text = await callGroq([{ role: 'user', content: evalPrompt }], 400);
+      const ev   = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+      state.attempts++;
+      const isCorrect = ev.result === 'correct';
+      const isPartial = ev.result === 'partial';
+
+      if (isCorrect) {
+        state.correct++;
+        state.streak++;
+        state.solved++;
+        state.xp += ev.xpAwarded;
+        if (state.streak > state.bestStreak) state.bestStreak = state.streak;
+        if (s.diff === 'hard') state.hardSolved++;
+        if (state.mode === 'explain') state.explainSolved++;
+        showXPToast('+' + ev.xpAwarded + ' xp // nice catch');
+        recordActivity();
+      } else if (isPartial) {
+        state.streak = 0;
+        state.solved++;
+        // partial credit is half xp
+        const pxp = Math.floor(ev.xpAwarded * 0.5);
+        state.xp += pxp;
+        showXPToast('+' + pxp + ' xp // partial credit');
+        recordActivity();
+      } else {
+        state.streak = 0;
+        showXPToast('// 0 xp \u2014 the bug wins this round');
+      }
+
+      updateWeakSpots(s.bugType, isCorrect);
+      checkBadges();
+      updateStats();
+
+      // show the feedback box with result colour
+      const lbl = isCorrect ? '\u2713 correct' : isPartial ? '~ partial' : '\u2717 incorrect';
+      document.getElementById('feedback-area').innerHTML = `<div class="feedback ${ev.result}">
+        <strong>${lbl}</strong> \u2014 ${ev.feedback}
+        <div class="fix-line">// fix: ${s.correctFix}</div>
+      </div>`;
+
+      // reveal the vote row and next button
+      document.getElementById('vote-area').style.display = 'block';
+      document.getElementById('next-area').style.display = 'block';
+      state.awaitingNext = true;
+    } catch (e) {
+      document.getElementById('submit-btn').disabled = false;
+      document.getElementById('feedback-area').innerHTML =
+        '<div class="feedback incorrect">// error evaluating answer. segfault?</div>';
+      console.error(e);
+    }
+  }
+
+  function nextSnippet() { generateSnippet(); }
+
+  // load leaderboard from localstorage and render the top 10
+  function loadLeaderboard() {
+    const rows = document.getElementById('lb-rows');
+    try {
+      const raw     = localStorage.getItem('bbt_leaderboard') || '[]';
+      const entries = JSON.parse(raw).sort((a, b) => b.xp - a.xp).slice(0, 10);
+      if (entries.length === 0) {
+        rows.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);font-style:italic">// no entries yet \u2014 be the first!</span>';
+        return;
+      }
+      const maxXP = entries[0]?.xp || 1;
+      rows.innerHTML = '';
+      entries.forEach((e, i) => {
+        const pct   = Math.round((e.xp / maxXP) * 100);
+        const medal = i === 0 ? '\uD83E\uDD47' : i === 1 ? '\uD83E\uDD48' : i === 2 ? '\uD83E\uDD49' : '';
+        rows.innerHTML += `<div class="lb-row">
+          <span class="lb-rank">${medal || ('#' + (i + 1))}</span>
+          <span class="lb-name">${e.name}</span>
+          <div class="lb-bar-bg"><div class="lb-bar-fill" style="width:${pct}%"></div></div>
+          <span class="lb-xp">${e.xp} xp</span>
+        </div>`;
+      });
+    } catch (e) {
+      rows.innerHTML = '<span style="font-size:12px;color:var(--text-secondary);font-style:italic">// could not load leaderboard</span>';
+    }
+  }
+
+  // save the user's score to the leaderboard (only updates if their score improved)
+  function postToLeaderboard() {
+    const name = document.getElementById('lb-name-input').value.trim();
+    if (!name) { showXPToast('// enter a name first'); return; }
+    if (state.xp === 0) { showXPToast('// solve some bugs first!'); return; }
+    try {
+      const raw   = localStorage.getItem('bbt_leaderboard') || '[]';
+      let entries = JSON.parse(raw);
+      const idx   = entries.findIndex(e => e.name.toLowerCase() === name.toLowerCase());
+      const entry = {
+        name, xp: state.xp, solved: state.solved,
+        accuracy: state.attempts === 0 ? 0 : Math.round((state.correct / state.attempts) * 100)
+      };
+      if (idx >= 0) {
+        // only update if this is a new high score
+        if (state.xp > entries[idx].xp) entries[idx] = entry;
+        else { showXPToast('// existing score (' + entries[idx].xp + ' xp) is higher'); return; }
+      } else {
+        entries.push(entry);
+      }
+      localStorage.setItem('bbt_leaderboard', JSON.stringify(entries));
+      showXPToast('// posted! ' + name + ' \u2192 ' + state.xp + ' xp');
+    } catch (e) {
+      showXPToast('// could not post to leaderboard');
+    }
+  }
+
+  // copy a text version of the stats card to the clipboard
+  function copyShare() {
+    const acc    = state.attempts === 0 ? '\u2014' : Math.round((state.correct / state.attempts) * 100) + '%';
+    const badges = [...state.earnedBadges].join(', ') || 'none';
+    const text   = `bug_bounty.exe // my stats\nxp: ${state.xp} | bugs solved: ${state.solved} | accuracy: ${acc} | best streak: ${state.bestStreak}\nlevel: ${getLevel(state.xp).replace('//', '').trim()} | badges: ${badges}`;
+    navigator.clipboard.writeText(text)
+      .then(() => showXPToast('// copied to clipboard'))
+      .catch(() => showXPToast('// copy failed \u2014 try manually'));
+  }
+
+  // kick everything off on page load
+  updateStats();
+  renderHeatmap();
+  renderWeakSpots();
+  generateSnippet();
+</script>
+</body>
+</html>
